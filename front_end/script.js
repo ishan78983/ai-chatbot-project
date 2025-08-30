@@ -139,7 +139,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const typingIndicator = showTypingIndicator();
 
         try {
-            const response = await fetch('https://ai-chatbot-project-nawf.onrender.com/api/generate', {
+            const response = await fetch('https://YOUR_RENDER_URL.onrender.com/api/generate', { // <-- IMPORTANT: USE YOUR LIVE RENDER URL
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ history: chats[currentChatId].history })

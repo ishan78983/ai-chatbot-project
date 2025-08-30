@@ -48,6 +48,7 @@ def generate_chat_api():
 
         if has_verb_and_noun or is_short_prompt_with_noun:
             
+            # Extract the subject of the image from the user's prompt
             search_subject = latest_user_message
             for verb in image_verbs + image_nouns + ["of", "a", "an"]:
                 search_subject = search_subject.lower().replace(verb, "").strip()
@@ -55,11 +56,12 @@ def generate_chat_api():
             if not search_subject:
                 search_subject = "image"
             
+            # Use the reliable placehold.co service
             encoded_subject = urllib.parse.quote_plus(search_subject)
             image_url = f"https://placehold.co/512x512/7c3aed/FFFFFF?text={encoded_subject}"
             
             return jsonify({
-                "text_response": f"This is a placeholder image for your request: '{search_subject}'.",
+                "text_response": f"This is a placeholder image for your request: '{search_subject}'. If this appears, your app is working!",
                 "image_url": image_url
             })
 
@@ -76,6 +78,7 @@ def generate_chat_api():
     except Exception as e:
         print(f"An error occurred during chat generation: {e}")
         return jsonify({"error": str(e)}), 500
+
 
 # --- START THE SERVER ---
 if __name__ == "__main__":
