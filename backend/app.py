@@ -1,8 +1,11 @@
 import os
+import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import google.generativeai as genai
 from dotenv import load_dotenv
+import re
+import urllib.parse
 
 # Load environment variables
 load_dotenv()
@@ -21,49 +24,61 @@ except Exception as e:
     print(f"Error configuring Google AI: {e}")
     text_model = None
 
-# --- API ROUTE for TWEET GENERATION ---
+# --- API ROUTE for CHAT ---
 @app.route("/api/generate", methods=["POST"])
-def generate_tweet_api():
+def generate_chat_api():
     if not text_model:
         return jsonify({"error": "AI model not configured"}), 500
         
     data = request.get_json()
-    if not all(key in data for key in ['topic', 'tone', 'length']):
-        return jsonify({"error": "Missing required fields: topic, tone, or length."}), 400
-    
-    topic = data['topic']
-    tone = data['tone']
-    length = data['length']
+    history = data.get('history')
+    latest_user_message = history[-1]['parts'][0]['text'] if history else ""
+
+    if not history:
+        return jsonify({"error": "Chat history is required"}), 400
 
     try:
-        # This is the specialized prompt for the Tweet Generator
-        prompt = f"""
-        You are an expert social media strategist and copywriter specializing in creating viral Twitter content.
-        Your task is to generate compelling content based on the user's request. Do not add any extra commentary, just the tweet(s).
+        # Flexible image request check
+        user_msg_lower = latest_user_message.lower()
+        image_verbs = ["generate", "create", "draw", "make", "show"]
+        image_nouns = ["image", "picture", "photo", "drawing", "painting"]
+        
+        has_verb_and_noun = any(verb in user_msg_lower for verb in image_verbs) and any(noun in user_msg_lower for noun in image_nouns)
+        is_short_prompt_with_noun = len(user_msg_lower.split()) <= 3 and any(noun in user_msg_lower for noun in image_nouns)
 
-        User's Request Details:
-        - Topic: "{topic}"
-        - Desired Tone: "{tone}"
-        - Desired Length: "{length}"
+        if has_verb_and_noun or is_short_prompt_with_noun:
+            
+            # Extract the subject of the image from the user's prompt
+            search_subject = latest_user_message
+            for verb in image_verbs + image_nouns + ["of", "a", "an"]:
+                search_subject = search_subject.lower().replace(verb, "").strip()
 
-        Instructions:
-        1. Generate the content adhering strictly to the specified tone and length.
-        2. Keep tweets concise and impactful (under 280 characters each).
-        3. Include 2-3 relevant and popular hashtags.
-        4. If a thread is requested (e.g., '3-Tweet Thread'), ensure each tweet flows logically to the next and number them (1/3, 2/3, 3/3).
-        5. Format your entire response as a single block of text, with each tweet separated by a new line.
-        """
+            if not search_subject:
+                search_subject = "image"
+            
+            # Use the reliable placehold.co service
+            encoded_subject = urllib.parse.quote_plus(search_subject)
+            image_url = f"https://placehold.co/512x512/7c3aed/FFFFFF?text={encoded_subject}"
+            
+            return jsonify({
+                "text_response": f"This is a placeholder image for your request: '{search_subject}'. If this appears, your app is working!",
+                "image_url": image_url
+            })
+
+        # --- Normal chat logic ---
+        system_instruction = {"role": "user", "parts": [{"text": "You are Gemini, a highly advanced, multi-talented AI assistant..."}]}
+        model_instruction = { "role": "model", "parts": [{"text": "Understood. I am Gemini..."}]}
+
+        full_history = [system_instruction, model_instruction] + history[:-1]
+        chat_session = text_model.start_chat(history=full_history)
+        response = chat_session.send_message(latest_user_message)
         
-        response = text_model.generate_content(prompt)
-        
-        # Split the single text block response into a list of tweets
-        tweets = [tweet.strip() for tweet in response.text.strip().split('\n') if tweet.strip()]
-        
-        return jsonify({"tweets": tweets})
+        return jsonify({"text_response": response.text})
 
     except Exception as e:
-        print(f"An error occurred during tweet generation: {e}")
+        print(f"An error occurred during chat generation: {e}")
         return jsonify({"error": str(e)}), 500
+
 
 # --- START THE SERVER ---
 if __name__ == "__main__":
