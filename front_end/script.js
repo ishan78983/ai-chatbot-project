@@ -10,7 +10,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const clearAllBtn = document.getElementById('clear-all-btn');
     
     // --- STATE MANAGEMENT ---
-    let chats = {}; // Object to hold all chat histories, e.g., { "chat_123": { title: "...", history: [] } }
+    let chats = {};
     let currentChatId = null;
 
     // --- INITIALIZATION ---
@@ -18,7 +18,15 @@ document.addEventListener('DOMContentLoaded', () => {
     loadChats();
     setupEventListeners();
     
-    // Check if any chats exist. If not, start a new one. Otherwise, load the most recent.
+    // Configure marked.js to use highlight.js for code blocks
+    marked.setOptions({
+        highlight: function(code, lang) {
+            const language = hljs.getLanguage(lang) ? lang : 'plaintext';
+            return hljs.highlight(code, { language }).value;
+        },
+        breaks: true, // Convert single line breaks to <br>
+    });
+    
     if (Object.keys(chats).length === 0) {
         startNewChat();
     } else {
@@ -33,19 +41,17 @@ document.addEventListener('DOMContentLoaded', () => {
         newChatBtn.addEventListener('click', startNewChat);
         clearAllBtn.addEventListener('click', () => {
              if (confirm("Are you sure you want to delete ALL chat history? This cannot be undone.")) {
-                localStorage.removeItem('aiChats');
-                chats = {};
-                startNewChat();
+                 localStorage.removeItem('aiChats');
+                 chats = {};
+                 startNewChat();
              }
         });
         
-        // Auto-resize textarea
         userInput.addEventListener('input', () => {
             userInput.style.height = 'auto';
             userInput.style.height = (userInput.scrollHeight) + 'px';
         });
 
-        // Submit on Enter key, but allow new line with Shift+Enter
         userInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
@@ -66,7 +72,7 @@ document.addEventListener('DOMContentLoaded', () => {
         localStorage.setItem('darkMode', document.documentElement.classList.contains('dark') ? 'enabled' : 'disabled');
     }
 
-    // --- LOCAL STORAGE & HISTORY MANAGEMENT ---
+    // --- LOCAL STORAGE & HISTORY ---
     function saveChats() {
         localStorage.setItem('aiChats', JSON.stringify(chats));
     }
@@ -96,7 +102,7 @@ document.addEventListener('DOMContentLoaded', () => {
             history: []
         };
         messageList.innerHTML = '';
-        appendMessage('bot', 'A new conversation has started. How can I help?');
+        appendMessage('bot', 'A new conversation has started. How can I assist you today?');
         renderHistoryList();
         saveChats();
     }
@@ -107,12 +113,13 @@ document.addEventListener('DOMContentLoaded', () => {
         messageList.innerHTML = '';
         chats[currentChatId].history.forEach(turn => {
             const sender = turn.role === 'user' ? 'user' : 'bot';
-            // Simple check to see if the content is an image URL to render it correctly on load
-            if (turn.parts[0].text.startsWith('!image')) {
-                 const imageUrl = turn.parts[0].text.replace('!image', '');
-                 appendImageMessage(imageUrl);
+            const messageData = turn.parts[0]; // The object containing text, image_base64, etc.
+
+            if (messageData.image_base64) {
+                 appendMessage(sender, messageData.text);
+                 appendImageMessage(messageData.image_base64);
             } else {
-                 appendMessage(sender, turn.parts[0].text);
+                 appendMessage(sender, messageData.text);
             }
         });
         renderHistoryList();
@@ -124,11 +131,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const message = userInput.value.trim();
         if (!message) return;
 
-        // Add user message to UI and current chat history
+        const userMessageData = { role: 'user', parts: [{ text: message }] };
         appendMessage('user', message);
-        chats[currentChatId].history.push({ role: 'user', parts: [{ text: message }] });
+        chats[currentChatId].history.push(userMessageData);
 
-        // Update title of chat if it's the first user message
         if (chats[currentChatId].history.length === 1) {
             chats[currentChatId].title = message.substring(0, 30) + (message.length > 30 ? '...' : '');
             renderHistoryList();
@@ -139,26 +145,31 @@ document.addEventListener('DOMContentLoaded', () => {
         const typingIndicator = showTypingIndicator();
 
         try {
-            const response = await fetch('https://YOUR_RENDER_URL.onrender.com/api/generate', { // <-- IMPORTANT: USE YOUR LIVE RENDER URL
+            const response = await fetch('http://127.0.0.1:5000/api/generate', { // MAKE SURE THIS IS YOUR BACKEND URL
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ history: chats[currentChatId].history })
             });
-            if (!response.ok) throw new Error('Server responded with an error.');
+            if (!response.ok) throw new Error(`Server error: ${response.statusText}`);
             
             const data = await response.json();
             typingIndicator.remove();
+            
+            // This object will store all parts of the model's response
+            const modelResponseParts = { text: "" };
 
             if (data.text_response) {
                 appendMessage('bot', data.text_response);
-                chats[currentChatId].history.push({ role: 'model', parts: [{ text: data.text_response }] });
+                modelResponseParts.text = data.text_response;
             }
-            if (data.image_url) {
-                appendImageMessage(data.image_url);
-                // Save a placeholder in history to know it was an image
-                chats[currentChatId].history.push({ role: 'model', parts: [{ text: `!image${data.image_url}` }] });
+            if (data.image_base64) {
+                appendImageMessage(data.image_base64);
+                modelResponseParts.image_base64 = data.image_base64;
             }
-            saveChats(); // Save after each successful interaction
+            
+            // Save the complete model response to history
+            chats[currentChatId].history.push({ role: 'model', parts: [modelResponseParts] });
+            saveChats();
 
         } catch (error) {
             typingIndicator.remove();
@@ -171,16 +182,46 @@ document.addEventListener('DOMContentLoaded', () => {
             `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5.8 13.3 3.5-3.5a2.1 2.1 0 0 1 3 0l3.5 3.5a2.1 2.1 0 0 1 0 3l-3.5 3.5a2.1 2.1 0 0 1-3 0l-3.5-3.5a2.1 2.1 0 0 1 0-3Z"></path></svg>` : 
             `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>`;
         const avatarBg = sender === 'bot' ? 'bg-indigo-500' : 'bg-pink-500';
-        const messageHTML = `<div class="message-container ${sender}"><div class="avatar ${avatarBg}">${avatarSVG}</div><div class="chat-bubble">${text}</div></div>`;
+        
+        // **NEW**: Render text through marked.js
+        const renderedText = marked.parse(text);
+
+        const messageElement = document.createElement('div');
+        messageElement.className = `message-container ${sender}`;
+        messageElement.innerHTML = `<div class="avatar ${avatarBg}">${avatarSVG}</div><div class="chat-bubble">${renderedText}</div>`;
+        
+        messageList.appendChild(messageElement);
+        
+        // **NEW**: Add copy buttons to any new code blocks
+        addCopyButtons(messageElement);
+        
+        messageList.scrollTop = messageList.scrollHeight;
+    }
+
+    function appendImageMessage(base64Image) {
+        const avatarSVG = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5.8 13.3 3.5-3.5a2.1 2.1 0 0 1 3 0l3.5 3.5a2.1 2.1 0 0 1 0 3l-3.5 3.5a2.1 2.1 0 0 1-3 0l-3.5-3.5a2.1 2.1 0 0 1 0-3Z"></path></svg>`;
+        // **CHANGED**: Use base64 data URI for the image source
+        const messageHTML = `<div class="message-container bot"><div class="avatar bg-indigo-500">${avatarSVG}</div><div class="chat-bubble image-bubble"><img src="data:image/png;base64,${base64Image}" alt="Generated image"></div></div>`;
         messageList.insertAdjacentHTML('beforeend', messageHTML);
         messageList.scrollTop = messageList.scrollHeight;
     }
 
-    function appendImageMessage(imageUrl) {
-        const avatarSVG = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5.8 13.3 3.5-3.5a2.1 2.1 0 0 1 3 0l3.5 3.5a2.1 2.1 0 0 1 0 3l-3.5 3.5a2.1 2.1 0 0 1-3 0l-3.5-3.5a2.1 2.1 0 0 1 0-3Z"></path></svg>`;
-        const messageHTML = `<div class="message-container bot"><div class="avatar bg-indigo-500">${avatarSVG}</div><div class="chat-bubble image-bubble"><img src="${imageUrl}" alt="Generated image"></div></div>`;
-        messageList.insertAdjacentHTML('beforeend', messageHTML);
-        messageList.scrollTop = messageList.scrollHeight;
+    // **NEW**: Function to find code blocks and add copy buttons
+    function addCopyButtons(element) {
+        const codeBlocks = element.querySelectorAll('pre');
+        codeBlocks.forEach(block => {
+            const btn = document.createElement('button');
+            btn.className = 'copy-btn';
+            btn.textContent = 'Copy';
+            btn.onclick = () => {
+                const code = block.querySelector('code').innerText;
+                navigator.clipboard.writeText(code).then(() => {
+                    btn.textContent = 'Copied!';
+                    setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+                });
+            };
+            block.appendChild(btn);
+        });
     }
     
     function showTypingIndicator() {

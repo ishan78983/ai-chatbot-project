@@ -176,6 +176,41 @@ body {
     border: 2px solid rgba(255, 255, 255, 0.2);
 }
 
+/* --- NEW: Code Block and Copy Button Styles --- */
+.chat-bubble pre {
+    position: relative;
+    background-color: #282c34; /* atom-one-dark background */
+    padding: 1rem;
+    border-radius: 0.5rem;
+    font-size: 0.875rem;
+    overflow-x: auto;
+    color: #abb2bf;
+}
+.chat-bubble code {
+    font-family: 'Courier New', Courier, monospace;
+}
+.copy-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background-color: rgba(255, 255, 255, 0.1);
+    color: white;
+    border: none;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.75rem;
+    opacity: 0.5;
+    transition: all 0.2s ease;
+}
+.chat-bubble pre:hover .copy-btn {
+    opacity: 1;
+}
+.copy-btn:hover {
+    background-color: rgba(255, 255, 255, 0.2);
+}
+
+
 /* --- Keyframe Animations --- */
 @keyframes fade-in-up {
     to { opacity: 1; transform: translateY(0); }
@@ -191,7 +226,7 @@ body {
 .animate-fade-in { animation: fade-in 0.5s ease-out forwards; }
 .animate-slide-in-left { animation: slide-in-left 0.5s ease-out forwards; }
 
-/* Custom scrollbar for message list */
+/* Custom scrollbar */
 #message-list::-webkit-scrollbar, #history-list::-webkit-scrollbar {
     width: 8px;
 }

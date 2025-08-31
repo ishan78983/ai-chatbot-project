@@ -4,8 +4,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import google.generativeai as genai
 from dotenv import load_dotenv
-import re
-import urllib.parse
+import base64
 
 # Load environment variables
 load_dotenv()
@@ -17,12 +16,41 @@ CORS(app)
 # Configure the Generative AI model
 try:
     GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+    STABILITY_API_KEY = os.getenv("STABILITY_API_KEY") # Get Stability AI key
     genai.configure(api_key=GOOGLE_API_KEY)
     text_model = genai.GenerativeModel('gemini-1.5-flash')
     print("Successfully configured Google AI text model")
 except Exception as e:
-    print(f"Error configuring Google AI: {e}")
+    print(f"Error configuring AI models: {e}")
     text_model = None
+    STABILITY_API_KEY = None
+
+# --- STABILITY AI IMAGE GENERATION FUNCTION ---
+def generate_image_with_stability(prompt):
+    if not STABILITY_API_KEY:
+        raise ValueError("Stability AI API key not found.")
+
+    url = "https://api.stability.ai/v2beta/stable-image/generate/sd3"
+    headers = {
+        "authorization": f"Bearer {STABILITY_API_KEY}",
+        "accept": "image/*"
+    }
+    files = {
+        "prompt": (None, prompt),
+        "output_format": (None, "png"),
+    }
+    
+    print(f"Sending request to Stability AI for prompt: {prompt}")
+    response = requests.post(url, headers=headers, files=files)
+    
+    if response.status_code == 200:
+        print("Successfully generated image from Stability AI.")
+        # Encode image bytes to a base64 string
+        base64_image = base64.b64encode(response.content).decode('utf-8')
+        return base64_image
+    else:
+        print(f"Stability AI Error: {response.text}")
+        raise Exception(f"Failed to generate image: {response.text}")
 
 # --- API ROUTE for CHAT ---
 @app.route("/api/generate", methods=["POST"])
@@ -40,37 +68,28 @@ def generate_chat_api():
     try:
         # Flexible image request check
         user_msg_lower = latest_user_message.lower()
-        image_verbs = ["generate", "create", "draw", "make", "show"]
-        image_nouns = ["image", "picture", "photo", "drawing", "painting"]
+        image_verbs = ["generate", "create", "draw", "make", "show", "paint"]
+        image_nouns = ["image", "picture", "photo", "drawing", "painting", "art", "artwork"]
         
-        has_verb_and_noun = any(verb in user_msg_lower for verb in image_verbs) and any(noun in user_msg_lower for noun in image_nouns)
-        is_short_prompt_with_noun = len(user_msg_lower.split()) <= 3 and any(noun in user_msg_lower for noun in image_nouns)
-
-        if has_verb_and_noun or is_short_prompt_with_noun:
+        has_verb = any(verb in user_msg_lower for verb in image_verbs)
+        has_noun = any(noun in user_msg_lower for noun in image_nouns)
+        
+        if has_verb and has_noun:
+            # Clean up the prompt to send to the image generator
+            image_prompt = latest_user_message
+            for verb in image_verbs + ["a", "an", "of"]:
+                image_prompt = image_prompt.lower().replace(verb, "").strip()
             
-            # Extract the subject of the image from the user's prompt
-            search_subject = latest_user_message
-            for verb in image_verbs + image_nouns + ["of", "a", "an"]:
-                search_subject = search_subject.lower().replace(verb, "").strip()
-
-            if not search_subject:
-                search_subject = "image"
-            
-            # Use the reliable placehold.co service
-            encoded_subject = urllib.parse.quote_plus(search_subject)
-            image_url = f"https://placehold.co/512x512/7c3aed/FFFFFF?text={encoded_subject}"
+            generated_image_base64 = generate_image_with_stability(image_prompt)
             
             return jsonify({
-                "text_response": f"This is a placeholder image for your request: '{search_subject}'. If this appears, your app is working!",
-                "image_url": image_url
+                "text_response": f"Here is the image I generated for '{image_prompt}':",
+                "image_base64": generated_image_base64
             })
 
         # --- Normal chat logic ---
-        system_instruction = {"role": "user", "parts": [{"text": "You are Gemini, a highly advanced, multi-talented AI assistant..."}]}
-        model_instruction = { "role": "model", "parts": [{"text": "Understood. I am Gemini..."}]}
-
-        full_history = [system_instruction, model_instruction] + history[:-1]
-        chat_session = text_model.start_chat(history=full_history)
+        # The system instruction is simplified as this is a better practice for chat models
+        chat_session = text_model.start_chat(history=history[:-1])
         response = chat_session.send_message(latest_user_message)
         
         return jsonify({"text_response": response.text})
@@ -78,7 +97,6 @@ def generate_chat_api():
     except Exception as e:
         print(f"An error occurred during chat generation: {e}")
         return jsonify({"error": str(e)}), 500
-
 
 # --- START THE SERVER ---
 if __name__ == "__main__":
